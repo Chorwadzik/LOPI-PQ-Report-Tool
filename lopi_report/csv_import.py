@@ -27,6 +27,20 @@ def _decode(path):
 
 
 def import_csv(path):
+    """Automatically select the Sonel or existing WinPQ text importer."""
+    from .source_detection import _file_kind
+    path = Path(path)
+    kind = _file_kind(path)
+    if kind == 'sonel_native' or re.fullmatch(r'\.pqm7\d\d', path.suffix.lower()):
+        raise ValueError('To natywny plik Sonel. W Sonel Analysis wybierz Pomiary → Raporty → Raport CSV, a następnie wskaż wyeksportowany CSV.')
+    if kind == 'sonel_csv':
+        from .sonel_csv import import_sonel_csv
+        return import_sonel_csv(path)
+    # Retain support for historical WinPQ files without units or with long preambles.
+    return _import_winpq_csv(path)
+
+
+def _import_winpq_csv(path):
     path = Path(path)
     text, digest = _decode(path)
     lines = text.splitlines()
@@ -144,10 +158,15 @@ def import_csv(path):
 
 def default_channels(dataset):
     """Krótki raport porównywalny zakresem do wzorca; bez 900 wykresów."""
+    if dataset.metadata.get('import_type') == 'Sonel Analiza CSV':
+        from .sonel_csv import default_sonel_channels
+        return default_sonel_channels(dataset)
     patterns = [r'UL[123](?:_(?:min|max))?', r'IL[123](?:_(?:min|max))?',
                 r'PL[123]', r'Ptotal', r'QL[123]', r'Qtotal', r'DL[123]', r'Dtotal',
                 r'THDL[123]', r'THD_I[123]', r'tg_\(fi\)(?:_L[123]|_)?', r'f']
     extra = set(harmonic_report_channels(dataset))
+    from .sonel_csv import default_sonel_channels
+    extra.update(default_sonel_channels(dataset))
     return [k for k in dataset.channels if k in extra or any(re.fullmatch(p, k, re.I) for p in patterns)]
 
 

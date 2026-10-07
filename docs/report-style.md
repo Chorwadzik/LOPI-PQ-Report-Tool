@@ -92,3 +92,24 @@ Sprawdzono 18-stronicowy raport z rzeczywistych 41 kanałów oraz 9-stronicowy
 przypadek z długim tytułem, opisem, wnioskami i brakującymi wartościami.
 Wszystkie 31 testów projektu przeszło. Spis treści odpowiada rzeczywistym
 stronom. Zmiana dotyczy składu; nie dodaje widm ani oceny normatywnej.
+
+## Aktualizacja z 2026-10-07 — wykresy total i szerokość
+
+Na prośbę użytkownika marginesy boczne zmniejszono z 25 do 15 mm.
+Wykresy, tabele i nagłówek wykorzystują 180 mm szerokości. Figury są
+renderowane w nowej szerokości przy zachowanej wysokości i wielkości czcionek.
+Marginesy górny i dolny pozostają po 25 mm.
+
+Ptotal, Qtotal, Dtotal oraz zbiorczy tg_(fi) (również z końcowym podkreśleniem)
+mają osobne strony z wykresami i tabelami, bezpośrednio po kanałach fazowych
+danej wielkości. W obu grupach tgφ pozostaje pełny zakres i opisane
+powiększenie P1–P99, liczone dla serii na danym wykresie. Statystyki,
+wartości źródłowe, flagi i jednostki pozostają bez zmian.
+
+Weryfikacja: 45 testów, test generowania PDF gotowym EXE oraz render
+wszystkich 22 stron raportu próbnego. Wykresy total są na osobnych stronach,
+a tabele i spis treści zachowują poprawny podział. Wyniki nadal wymagają
+uzupełnienia metadanych i wniosków przez autora; nie powstała ocena normatywna.
+Aktualny build: `dist/wide-charts/LOPI-PQ-Report.exe`, skopiowany także do
+`dist/LOPI-PQ-Report.exe` i `dist/poprawka/LOPI-PQ-Report.exe`. Otwarty
+`dist/pdf-fix/LOPI-PQ-Report.exe` pozostaje wcześniejszą wersją.

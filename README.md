@@ -1,12 +1,19 @@
 # LOPI PQ Report Tool
 
-Lokalna aplikacja Windows do generowania raportów PDF z pomiarów PQBox.
+Lokalna aplikacja Windows do generowania raportów PDF z pomiarów PQBox i eksportów CSV Sonel.
 Nie używa AI, API, tokenów ani połączeń sieciowych. Wykresy, statystyki i PDF
 powstają na komputerze. Word i WinPQ nie są wymagane dla obsługiwanego profilu PQF.
 
 ## Uruchomienie
 
-Uruchom `dist/LOPI-PQ-Report.exe`. Nie wymaga instalowania Pythona.
+Uruchom `dist/LOPI-PQ-Report-v1.3.exe`. Nie wymaga instalowania Pythona.
+
+Numer bieżącego wydania jest w `VERSION`, a opis zmian w `CHANGELOG.md`.
+W `dist` pozostaje jeden aktualny EXE. Budowanie najpierw tworzy i sprawdza
+nowe wydanie w katalogu roboczym, a następnie przenosi poprzedni EXE do
+`dist/Kontrola funkcji/<poprzednia nazwa>/<data archiwizacji>/`.
+Przed kolejnym wydaniem zwiększamy numer stosownie do zmian: poprawki
+np. v1.1.1, rozszerzenia v1.2, duże zmiany v2.0.
 
 1. W **Pliki i pomiary** wskaż folder pomiaru PQBox oraz folder zapisu PDF.
 2. Wczytaj pomiary. Folder może zawierać jeden podfolder pomiarowy; przy wielu
@@ -15,12 +22,32 @@ Uruchom `dist/LOPI-PQ-Report.exe`. Nie wymaga instalowania Pythona.
    **+2 godziny**. To jawne ustawienie, nie automatyczne rozpoznawanie strefy.
 4. W **Dane raportu i wnioski** wpisz tytuł, numer, wykonawcę, obiekt, adres,
    autorów, analizator, opis i własne wnioski.
-5. Wybierz kanały, potwierdź sprawdzenie dat dla PQF i naciśnij **Generuj PDF**.
+5. W zakładce **Kanały i PDF** porównaj wyświetlony na górze okres z WinPQ
+   i zaznacz **Sprawdzono daty i zakres pomiaru w WinPQ** (wymagane dla PQF).
+   Wybierz kanały i naciśnij **Generuj PDF**. Potwierdzenie jest zerowane
+   po zmianie źródła, przesunięcia czasu lub ponownym wczytaniu danych.
    Nazwę pliku ustala użytkownik. Nadpisanie istniejącego PDF wymaga potwierdzenia.
 
-### THD(A) i widma z CSV
+### Sonel CSV
 
-Wczytaj pełny eksport przez **Wczytaj pomocniczy CSV…**. W zakładce **Kanały i PDF**
+Wybierz **Wczytaj CSV (Sonel / WinPQ)…** i wskaż eksport tabeli pomiarów.
+Program sam rozpozna format i wybierze podstawowe kanały. Potem uzupełnij
+dane raportu, wskaż folder wynikowy i naciśnij **Generuj PDF**.
+W Sonel Analysis użyj **Pomiary → zaznacz całą tabelę → Raporty → Raport CSV**,
+z nagłówkami i flagami, bez dzielenia pliku. Natywne `.pqm710` wymagają tego eksportu.
+
+Import Sonel obejmuje podstawowe wielkości przy najkrótszej agregacji,
+zachowuje czas UTC z pliku, jednostki, warianty mocy i osobne sumy Σ.
+Harmoniczne, energie, flicker i inne agregacje są pomijane z ostrzeżeniem.
+Od v1.3 domyślny raport pokazuje jeden tgφ na fazę oraz osobny tgφ dla Σ:
+sumę wariantów L+, C−, L− i C+ z zachowaniem znaków. Brak składowej daje lukę.
+Pierwotne warianty pozostają dostępne na liście kanałów.
+Flaga G/Gf pozostawia dane z uwagą o synchronizacji czasu; pozostałe flagi
+wykluczają wiersz. Szczegóły i ograniczenia: [Sonel CSV](docs/sonel-import.md).
+
+### THD(A) i widma z CSV WinPQ
+
+Wczytaj pełny eksport przez **Wczytaj CSV (Sonel / WinPQ)…**. W zakładce **Kanały i PDF**
 przycisk **Podstawowe + widma** wybiera podstawowe wyniki, THD(A) i obsługiwane
 harmoniczne. **Tylko THD(A) i widma** tworzy krótsze opracowanie tych wielkości.
 Wybierz statystykę słupków: **Średnia** (domyślna), **Maksimum** albo **Percentyl 95**.
@@ -59,6 +86,9 @@ odczytane kanały do pliku UTF-8 ze średnikiem; braki pozostają puste.
   o imporcie są oddzielone od głównej prezentacji wyników.
 - Wykres tgφ: pełny zakres oraz opisane powiększenie P1–P99. Tabele zawsze
   obejmują cały poprawny zbiór. Wykresy nie łączą luk i nie redukują próbek.
+- Ptotal, Qtotal, Dtotal oraz zbiorczy tgφ mają osobne wykresy i tabele,
+  bezpośrednio po odpowiednich kanałach fazowych. Marginesy boczne wynoszą
+  15 mm, a wykresy i tabele mają szerokość 180 mm.
 - Import pierwszego bloku interwałów CSV z WinPQ. Dalsze bloki o innych
   interwałach nie są łączone; pominięcie jest opisane w raporcie.
 
@@ -117,3 +147,35 @@ CLI odmawia nadpisania istniejącego PDF.
 
 Zasady: `AGENTS.md`. Analiza PQF: `docs/pqf-analysis.md`.
 Styl raportu: `docs/report-style.md`. Źródła pozostają tylko do odczytu.
+
+### Poprawka dostępności potwierdzenia dat — 2026-10-07
+
+Potwierdzenie i okres pomiaru są na górze zakładki **Kanały i PDF**.
+Zakładka ma paski przewijania, a uwagi mają osobny pasek. Przy próbie
+generowania niepotwierdzonego PQF widok wraca do potwierdzenia.
+Sprawdzono 44 testy, w tym małe okna i skalę Tk 2.0; niezależna recenzja
+potwierdziła dostępność listy i uwag. Nowy EXE uruchomiono samodzielnie
+i zamknięto poprawnie (kod 0).
+
+Gotowy plik tej poprawki: `dist/poprawka/LOPI-PQ-Report.exe`.
+Dotychczasowy EXE był otwarty i zablokowany przez Windows, dlatego pozostał
+bez podmiany. Przed przejściem do poprawionej wersji zapisz bieżący projekt.
+Nie potwierdzano dat konkretnego pomiaru za użytkownika ani nie wykonywano
+ponownej kontroli wizualnej PDF: zmiana dotyczy interfejsu. Kolejny krok:
+otworzyć projekt w poprawionej wersji, wczytać pomiary i porównać daty z WinPQ.
+
+### Uzupełnienie poprawki — zależności PDF
+
+Poprzednia kontrola uruchomienia EXE nie wykryła brakującego ReportLab:
+testy pomocniczych obliczeń nie uruchamiały całego generatora. Uzupełniono
+środowisko z `requirements-build.txt`. `build.ps1` teraz przerywa budowanie,
+jeśli brakuje zależności, i wymaga wygenerowania PDF przez gotowy EXE
+na syntetycznym CSV z obcego katalogu roboczego (`tools/smoke_test_exe.py`).
+Opcja `-DistPath` pozwala zbudować nową wersję, gdy stary EXE jest otwarty.
+
+Sprawdzono 44 testy oraz generowanie PDF przez EXE na danych syntetycznych
+i wskazanym przez użytkownika folderze PQF. Gotowy raport roboczy sprawdzono
+wizualnie. Zaktualizowano EXE w `dist`, `dist/poprawka` i `dist/pdf-fix`;
+wersje mają identyczne SHA256. Dane pomiarowe i wynikowe pozostają poza Git.
+Metadane autora i wnioski nie były uzupełniane automatycznie. Próbne
+generowanie potwierdza działanie techniczne, nie ocenę normatywną pomiaru.

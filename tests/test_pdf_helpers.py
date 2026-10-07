@@ -6,6 +6,53 @@ from lopi_report.pdf_report import channel_groups, channel_statistics, plot_samp
 
 
 class PdfHelpersTests(unittest.TestCase):
+    def test_combined_sonel_tangent_has_phases_and_separate_total(self):
+        from lopi_report.pdf_report import _is_tangent_channel
+        phases = [f'tg(φ) L{i} śred. 10 s' for i in (1, 2, 3)]
+        total = 'tg(φ) Σ śred. 10 s'
+        groups = sorted(channel_groups([total, *phases], {}), key=report_group_order)
+        self.assertEqual(groups, [phases, [total]])
+        self.assertTrue(all(_is_tangent_channel(name) for name in phases + [total]))
+        self.assertEqual(section_title(phases), 'Współczynnik tg(φ) — fazy, śred. 10 s')
+
+    def test_sonel_groups_preserve_definitions_and_aggregation(self):
+        names = [f"{quantity} {wire} {statistic} {aggregation}"
+                 for quantity in ("P", "Q1", "QB", "SN", "tg(φ)L+", "tg(φ)C-")
+                 for statistic in ("śred.", "min.", "maks.")
+                 for aggregation in ("10 s", "10 min")
+                 for wire in ("L1", "L2", "L3", "Σ")]
+        groups = channel_groups(names, {})
+        self.assertEqual(len(groups), 72)
+        self.assertEqual(sorted(n for group in groups for n in group), sorted(names))
+        for group in groups:
+            self.assertIn(len(group), (1, 3))
+            if len(group) == 1:
+                self.assertIn(" Σ ", group[0])
+            else:
+                self.assertEqual(len({n.replace("L1 ", "L* ").replace("L2 ", "L* ").replace("L3 ", "L* ") for n in group}), 1)
+
+    def test_sonel_current_star_neutral_and_line_voltages_stay_distinct(self):
+        phases = [f"I *L{i} śred. 10 s" for i in (1, 2, 3)]
+        neutral = "I *N śred. 10 s"
+        self.assertEqual(channel_groups(phases + [neutral], {}), [phases, [neutral]])
+        lines = [f"U L{i} śred. 10 s" for i in (12, 23, 31)]
+        phases = [f"U L{i} śred. 10 s" for i in (1, 2, 3)]
+        self.assertEqual(channel_groups(phases + lines, {}), [phases, lines])
+
+    def test_sonel_titles_order_and_tangent_variants(self):
+        from lopi_report.pdf_report import _is_tangent_channel, channel_color
+        self.assertEqual(section_title(["Q1 L1 śred. 10 s"]), "Moc bierna Q1 — fazy, śred. 10 s")
+        self.assertEqual(section_title(["SN Σ śred. 10 s"]), "Moc SN — suma Σ, śred. 10 s")
+        self.assertEqual(section_title(["tg(φ)L+ Σ śred. 10 s"]), "Współczynnik tg(φ)L+ — suma Σ, śred. 10 s")
+        for variant in ("L+", "L-", "C+", "C-"):
+            for wire in ("L1", "Σ"):
+                self.assertTrue(_is_tangent_channel(f"tg(φ){variant} {wire} śred. 10 s"))
+        self.assertFalse(_is_tangent_channel("PF L1 śred. 10 s"))
+        phases = [f"P L{i} śred. 10 s" for i in (1, 2, 3)]
+        total = "P Σ śred. 10 s"
+        self.assertEqual(sorted(channel_groups([total, *phases], {}), key=report_group_order), [phases, [total]])
+        self.assertEqual(channel_color(total), "#8b54a2")
+
     def test_thda_colors_do_not_depend_on_selection_order(self):
         from lopi_report.pdf_report import channel_color
         for index in range(4):
@@ -52,9 +99,24 @@ class PdfHelpersTests(unittest.TestCase):
     def test_winpq_names_and_totals(self):
         names = ["THD_I1", "THD_I2", "THD_I3", "PL1", "PL2", "PL3", "Ptotal", "tg_(fi)_L1", "tg_(fi)_L2", "tg_(fi)_L3", "tg_(fi)_"]
         units = {n: "A" if n.startswith("THD") else "W" if n.startswith("P") else "" for n in names}
-        self.assertEqual(channel_groups(names, units), [names[:3], names[3:7], names[7:]])
+        self.assertEqual(channel_groups(names, units), [names[:3], names[3:6], [names[6]], names[7:10], [names[10]]])
         self.assertEqual(section_title(["UL1_min", "UL2_min"]), "Napięcia fazowe — kanały minimum")
         self.assertEqual(section_title(["THD_I1"]), "Odkształcenia harmoniczne prądu")
+
+    def test_totals_are_separate_and_follow_their_phases(self):
+        for prefix, unit, title in (("P", "W", "Moc czynna"), ("Q", "Var", "Moc bierna"), ("D", "Var", "Moc dystorsji")):
+            with self.subTest(prefix=prefix):
+                phases = [prefix + "L" + str(i) for i in (1, 2, 3)]
+                total = prefix + "total"
+                names = [total, *phases]
+                groups = sorted(channel_groups(names, {n: unit for n in names}), key=report_group_order)
+                self.assertEqual(groups, [phases, [total]])
+                self.assertEqual(section_title([total]), title + " — total")
+        phases = ["tg_(fi)_L1", "tg_(fi)_L2", "tg_(fi)_L3"]
+        for total in ("tg_(fi)", "tg_(fi)_"):
+            names = [total, *phases]
+            self.assertEqual(sorted(channel_groups(names, {}), key=report_group_order), [phases, [total]])
+            self.assertEqual(section_title([total]), "Współczynnik tgφ — total")
 
     def test_presentation_units(self):
         self.assertEqual(presentation_scale("PL1", "W"), (0.001, "kW"))

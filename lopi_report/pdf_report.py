@@ -13,22 +13,56 @@ from xml.sax.saxutils import escape
 from datetime import datetime
 
 
+def _sonel_channel(name):
+    """Read only the explicit label structure, retaining quantity definitions."""
+    return re.fullmatch(
+        r"(?P<quantity>.+?) (?P<wire>\*?L[123]|L12|L23|L31|\*?N|N-PE|Σ) "
+        r"(?P<statistic>śred\.|min\.|maks\.|chwil\.) (?P<aggregation>\d+(?:[.,]\d+)? (?:s|min|h))", name)
+
+
 def _family(name):
+    sonel = _sonel_channel(name)
+    if sonel:
+        quantity, wire, statistic, aggregation = sonel.groups()
+        if re.fullmatch(r"\*?L[123]", wire):
+            wire = "*L*" if wire.startswith("*") else "L*"
+        elif wire in ("L12", "L23", "L31"):
+            wire = "L**"
+        return f"sonel:{quantity} {wire} {statistic} {aggregation}"
     name = name.rstrip("_")
     if re.fullmatch(r"THD_\(A\)_I[123N]", name, re.I):
         return "THD_(A)_I*"
     family = re.sub(r"(?i)L[123](?!\d)", "L*", name)
     family = re.sub(r"(?i)^(THD_I)[123](?!\d)", r"\1*", family)
-    if re.fullmatch(r"[PQDS]total", name, re.I):
+    if re.fullmatch(r"[PQD]total", name, re.I):
+        return name[0].upper() + "total"
+    if re.fullmatch(r"Stotal", name, re.I):
         return name[0].upper() + "L*"
     if name.lower() == "tg_(fi)":
-        return "tg_(fi)_L*"
+        return "tg_(fi)_total"
     return family
 
 
 def section_title(names):
+    sonel = _sonel_channel(names[0])
+    if sonel:
+        quantity, wire, statistic, aggregation = sonel.groups()
+        titles = {"U": "Napięcia", "U DC": "Napięcia DC", "I": "Prądy",
+                  "P": "Moc czynna P", "Q1": "Moc bierna Q1", "QB": "Moc bierna QB",
+                  "Q": "Moc bierna Q", "D": "Moc D", "SN": "Moc SN", "Sn": "Moc Sn", "S": "Moc pozorna S",
+                  "THD U": "THD napięcia", "THD I": "THD prądu",
+                  "f": "Częstotliwość", "PF": "Współczynnik PF", "cos(φ)": "Współczynnik cosφ"}
+        title = titles.get(quantity, quantity)
+        if quantity.startswith("tg(φ)"):
+            title = "Współczynnik " + quantity
+        wire_label = ("suma Σ" if wire == "Σ" else "międzyfazowe" if wire in ("L12", "L23", "L31")
+                      else wire if wire in ("N", "*N", "N-PE") else "fazy")
+        return f"{title} — {wire_label}, {statistic} {aggregation}"
     family = _family(names[0]).lower()
     suffix = ""
+    totals = {"ptotal": "pl*", "qtotal": "ql*", "dtotal": "dl*", "tg_(fi)_total": "tg_(fi)_l*"}
+    if family in totals:
+        family, suffix = totals[family], " — total"
     if family.endswith("_min"):
         family, suffix = family[:-4], " — kanały minimum"
     elif family.endswith("_max"):
@@ -58,7 +92,7 @@ def channel_color(name, index=0):
     phase = re.search(r"(?i)(?:L|THD_I|THD_\(A\)_I)([123])(?!\d)", name)
     if phase:
         return palette[int(phase.group(1)) - 1]
-    if name in ("THD_(A)_IN", "THD_IN") or "total" in name.lower() or name.rstrip("_").lower() == "tg_(fi)":
+    if name in ("THD_(A)_IN", "THD_IN") or "total" in name.lower() or name.rstrip("_").lower() == "tg_(fi)" or "Σ" in name:
         return palette[3]
     return palette[index % len(palette)]
 
@@ -87,12 +121,27 @@ def channel_statistics(values):
 
 def report_group_order(names):
     """Presentation order only; retain unknown channels after known quantities."""
+    sonel = _sonel_channel(names[0])
+    if sonel:
+        quantity, wire, statistic, aggregation = sonel.groups()
+        order = {"U": 0, "U DC": 0, "I": 1, "P": 2, "Q": 3, "Q1": 3, "QB": 3,
+                 "D": 4, "SN": 4, "Sn": 4, "S": 5, "THD U": 6, "THD I": 7, "f": 9}
+        rank = 8 if quantity.startswith("tg(φ)") else order.get(quantity, 10)
+        return rank, 0, False, quantity, {"śred.": 0, "maks.": 1, "min.": 2, "chwil.": 3}[statistic], aggregation, wire == "Σ", wire
     family = _family(names[0]).lower()
     suffix = 1 if family.endswith("_max") else 2 if family.endswith("_min") else 0
     base = re.sub(r"_(min|max)$", "", family)
+    totals = {"ptotal": "pl*", "qtotal": "ql*", "dtotal": "dl*", "tg_(fi)_total": "tg_(fi)_l*"}
+    total = base in totals
+    base = totals.get(base, base)
     order = {"ul*": 0, "il*": 1, "pl*": 2, "ql*": 3, "dl*": 4,
              "sl*": 5, "thdl*": 6, "thd_i*": 7, "thd_(a)_i*": 7, "tg_(fi)_l*": 8, "f": 9}
-    return order.get(base, 10), suffix
+    return order.get(base, 10), suffix, total
+
+
+def _is_tangent_channel(name):
+    sonel = _sonel_channel(name)
+    return (sonel is not None and sonel.group("quantity").startswith("tg(φ)")) or _family(name).lower() in ("tg_(fi)_l*", "tg_(fi)_total")
 
 
 def central_plot_range(series):
@@ -164,6 +213,9 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
     from reportlab.platypus.tableofcontents import TableOfContents
     from .harmonics import harmonic_channel, validate_thda, spectrum_groups
 
+    side_margin = 15 * mm
+    content_width = A4[0] - 2 * side_margin
+
     if not dataset.times or not dataset.channels:
         raise ValueError("Brak pomiarów do raportu.")
     if any(b <= a for a, b in zip(dataset.times, dataset.times[1:])):
@@ -209,6 +261,8 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
 
     def text_value(key):
         value = metadata.get(key, "")
+        if key == "instrument" and not str(value).strip():
+            value = dataset.metadata.get("instrument", "")
         if isinstance(value, (list, tuple)):
             value = ", ".join(str(v) for v in value)
         return str(value).strip() or "Nie podano"
@@ -220,6 +274,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
     def table(rows, widths, header=True, numeric=False, numeric_from=2):
         cells = [[para(v, header_cell if header and r == 0 else numeric_cell if numeric and c >= numeric_from else cell)
                   for c, v in enumerate(row)] for r, row in enumerate(rows)]
+        widths = [width * content_width / sum(widths) for width in widths]
         t = Table(cells, colWidths=widths, repeatRows=1 if header else 0, hAlign="LEFT", splitInRow=1)
         commands = [("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#BFBFBF")),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -306,10 +361,12 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
         if index == 1:
             story.append(chapter("2. Wyniki pomiarów"))
         story.append(chapter(f"2.{index}. {friendly_title}", level=1))
+        if all(name in dataset.metadata.get('combined_tangent_channels', []) for name in names):
+            story.append(para("Kanał połączony: suma wartości tgφ L+, C−, L− i C+ z zachowaniem znaków. Suma Σ pochodzi z kanałów Σ analizatora, nie z sumy faz. Brak składowej oznacza brak wyniku.", small))
         unit = dataset.units.get(names[0], "")
         scale, display_unit = presentation_scale(names[0], unit)
-        zoom_range = central_plot_range([dataset.channels[n] for n in names]) if _family(names[0]).lower() == "tg_(fi)_l*" else None
-        fig = Figure(figsize=(6.3, 5.25 if zoom_range else 4.65), dpi=180, layout="constrained")
+        zoom_range = central_plot_range([dataset.channels[n] for n in names]) if _is_tangent_channel(names[0]) else None
+        fig = Figure(figsize=(content_width / 72, 5.25 if zoom_range else 4.65), dpi=180, layout="constrained")
         FigureCanvasAgg(fig)
         axes = list(fig.subplots(2, 1, sharex=True)) if zoom_range else [fig.add_subplot(111)]
         ax = axes[0]
@@ -318,7 +375,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
             ys = [y * scale for y in ys]
             isolated_x, isolated_y = isolated_plot_samples(xs, ys)
             color = channel_color(name, j)
-            label = name if len(name) < 50 else name[:47] + "…"
+            label = name if _sonel_channel(name) or len(name) < 50 else name[:47] + "…"
             for target_ax in axes:
                 target_ax.plot(xs, ys, color=color, linewidth=0.65, label=label,
                                marker="." if len(xs) < 3 else None, markersize=3)
@@ -348,7 +405,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
         fig.savefig(buf, format="png", dpi=180)
         buf.seek(0)
         buffers.append(buf)
-        story.append(KeepTogether([Image(buf, width=160 * mm, height=(133.3 if zoom_range else 118.1) * mm),
+        story.append(KeepTogether([Image(buf, width=content_width, height=(133.3 if zoom_range else 118.1) * mm),
                                  para(f"Wykres {index}. {friendly_title}", caption)]))
         if zoom_range:
             low, high, outside = zoom_range
@@ -389,7 +446,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
             story.append(chapter("2. Wyniki pomiarów"))
         story.append(chapter(f"2.{index}. {friendly_title}", level=1))
         story.append(para(f"Statystyka: {statistic_label}. Okres: {format_time(dataset.times[0])} – {format_time(dataset.times[-1])}.", small))
-        fig = Figure(figsize=(6.3, 6.15), dpi=180, layout="constrained")
+        fig = Figure(figsize=(content_width / 72, 6.15), dpi=180, layout="constrained")
         FigureCanvasAgg(fig)
         axes = list(fig.subplots(len(phases), 1, sharex=True))
         orders = [row["order"] for row in spectrum["rows"]]
@@ -422,7 +479,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
         fig.savefig(buf, format="png", dpi=180)
         buf.seek(0)
         buffers.append(buf)
-        story.append(Image(buf, width=160 * mm, height=156.2 * mm))
+        story.append(Image(buf, width=content_width, height=156.2 * mm))
         story.append(para(f"Wykres {index}. {friendly_title} — {statistic_label}", caption))
         story.append(para("Kolory oznaczają fazy; N oznacza przewód neutralny. Każdy słupek przedstawia wybraną statystykę danej harmonicznej z ważnych próbek. Nie zastosowano progów normatywnych ani skali procentu limitu. Znak × pod osią oznacza brak wyniku dla danego rzędu; brak nie oznacza zera.", small))
         story.append(PageBreak())
@@ -443,6 +500,10 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
     story.extend([PageBreak(), chapter("3. Wnioski autora"), *author_text("conclusions")])
     story.extend([PageBreak(), chapter("Załącznik A. Informacje techniczne"),
                   para("Źródła i znaczniki czasu", subheading)])
+    if dataset.metadata.get("import_type"):
+        story.append(para(f"Format źródła: {dataset.metadata['import_type']}."))
+    if dataset.metadata.get("instrument"):
+        story.append(para(f"Analizator zapisany w eksporcie: {dataset.metadata['instrument']}."))
     meaning = dataset.metadata.get("timestamp_meaning")
     story.append(para(f"Znaczenie znaczników czasu: {meaning}" if meaning else
                       "Znaczenie znaczników czasu (początek lub koniec interwału) nie zostało potwierdzone w metadanych."))
@@ -471,11 +532,11 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
         if doc.page > 1:
             canvas.setStrokeColor(colors.HexColor("#BFBFBF"))
             canvas.setLineWidth(0.4)
-            canvas.line(25 * mm, A4[1] - 18 * mm, A4[0] - 25 * mm, A4[1] - 18 * mm)
-            canvas.drawString(25 * mm, A4[1] - 15 * mm, "LOPI | Raport z pomiarów")
+            canvas.line(side_margin, A4[1] - 18 * mm, A4[0] - side_margin, A4[1] - 18 * mm)
+            canvas.drawString(side_margin, A4[1] - 15 * mm, "LOPI | Raport z pomiarów")
             report_number = text_value("report_number")
             if len(report_number) <= 45:
-                canvas.drawRightString(A4[0] - 25 * mm, A4[1] - 15 * mm, report_number)
+                canvas.drawRightString(A4[0] - side_margin, A4[1] - 15 * mm, report_number)
         canvas.drawCentredString(A4[0] / 2, 12.5 * mm, str(doc.page))
         canvas.restoreState()
 
@@ -490,7 +551,7 @@ def generate_report(dataset, metadata: dict, output_path: Path, progress=None) -
     fd, temp_name = tempfile.mkstemp(prefix="lopi_report_", suffix=".pdf", dir=output_path.parent)
     os.close(fd)
     try:
-        doc = ReportDocument(temp_name, pagesize=A4, leftMargin=25 * mm, rightMargin=25 * mm,
+        doc = ReportDocument(temp_name, pagesize=A4, leftMargin=side_margin, rightMargin=side_margin,
                                 topMargin=25 * mm, bottomMargin=25 * mm,
                                 title=text_value("title"), author=text_value("authors"))
         frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height,

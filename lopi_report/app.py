@@ -59,8 +59,8 @@ def validate_project(data):
 class Application:
     def __init__(self, root):
         self.root = root
-        root.title("LOPI • Raport z pomiarów PQBox")
-        root.geometry("1050x850")
+        root.title("LOPI • Raport z pomiarów PQBox / Sonel")
+        root.geometry(f"1050x{min(850, root.winfo_screenheight() - 100)}")
         root.minsize(800, 650)
         self.dataset = None
         self.last_pdf = None
@@ -80,6 +80,7 @@ class Application:
         self.values["title"].set("Raport z pomiarów jakości energii elektrycznej")
         self.status = tk.StringVar(value="Wskaż folder pomiarów i folder zapisu PDF.")
         self.info = tk.StringVar(value="Nie wczytano pomiarów.")
+        self.measurement_period = tk.StringVar(value="Nie wczytano pomiarów.")
         self._build()
         self.source_folder.trace_add("write", self._source_changed)
         self.time_offset.trace_add("write", self._source_changed)
@@ -111,10 +112,31 @@ class Application:
         ttk.Label(toolbar, text="Lokalnie • bez AI i połączeń sieciowych").grid(row=0, column=2, padx=20)
         self.tabs = ttk.Notebook(outer)
         self.tabs.grid(row=2, column=0, sticky="nsew")
-        files, details, channels = (ttk.Frame(self.tabs, padding=16) for _ in range(3))
+        files, details, channels_host = (ttk.Frame(self.tabs, padding=16) for _ in range(3))
         self.tabs.add(files, text="1. Pliki i pomiary")
         self.tabs.add(details, text="2. Dane raportu i wnioski")
-        self.tabs.add(channels, text="3. Kanały i PDF")
+        self.tabs.add(channels_host, text="3. Kanały i PDF")
+        # Keep the controls' requested sizes at high DPI; scroll when they do not fit.
+        channels_host.columnconfigure(0, weight=1)
+        channels_host.rowconfigure(0, weight=1)
+        self.channels_canvas = tk.Canvas(channels_host, highlightthickness=0)
+        self.channels_canvas.grid(row=0, column=0, sticky="nsew")
+        vertical = ttk.Scrollbar(channels_host, command=self.channels_canvas.yview)
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal = ttk.Scrollbar(channels_host, orient="horizontal", command=self.channels_canvas.xview)
+        horizontal.grid(row=1, column=0, sticky="ew")
+        self.channels_canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        channels = ttk.Frame(self.channels_canvas)
+        content = self.channels_canvas.create_window(0, 0, window=channels, anchor="nw")
+
+        def fit_channels(event=None):
+            self.channels_canvas.itemconfigure(
+                content, width=max(channels.winfo_reqwidth(), self.channels_canvas.winfo_width()),
+                height=max(channels.winfo_reqheight(), self.channels_canvas.winfo_height()))
+            self.channels_canvas.configure(scrollregion=self.channels_canvas.bbox("all"))
+
+        self.channels_canvas.bind("<Configure>", fit_channels)
+        channels.bind("<Configure>", fit_channels)
         files.columnconfigure(1, weight=1)
         for row, (label, variable, picker) in enumerate([
             ("Folder plików PQBox", self.source_folder, self.pick_source),
@@ -126,8 +148,8 @@ class Application:
         ttk.Label(files, text="Nazwa pliku PDF").grid(row=2, column=0, sticky="w", pady=8)
         self._entry(files, self.filename, row=2, column=1, sticky="ew", padx=10)
         self._button(files, "Wczytaj pomiary PQBox", self.load_measurements, row=3, column=1, sticky="w", padx=10, pady=12)
-        self._button(files, "Wczytaj pomocniczy CSV…", self.pick_csv, row=4, column=1, sticky="w", padx=10)
-        ttk.Label(files, text="CSV: jawny import pliku wyeksportowanego z WinPQ mobil.\nDane i opisy zapisane w projekcie nie zawierają kopii pomiarów.", wraplength=670).grid(row=5, column=0, columnspan=3, sticky="w", pady=18)
+        self._button(files, "Wczytaj CSV (Sonel / WinPQ)…", self.pick_csv, row=4, column=1, sticky="w", padx=10)
+        ttk.Label(files, text="CSV: program rozpoznaje eksport Sonel Analysis lub WinPQ mobil.\nSonel: Pomiary → zaznacz dane → Raporty → Raport CSV (bez dzielenia pliku).\nDane i opisy zapisane w projekcie nie zawierają kopii pomiarów.", wraplength=670).grid(row=5, column=0, columnspan=3, sticky="w", pady=18)
         ttk.Label(files, text="Przesunięcie czasu PQF [h]").grid(row=6, column=0, sticky="w", pady=8)
         self._entry(files, self.time_offset, row=6, column=1, sticky="ew", padx=10)
         ttk.Label(files, text="Dla dostarczonej sesji +2 h. Porównaj zakres czasu z WinPQ; inne ustawienia zegara wymagają weryfikacji. Po zmianie przesunięcia wczytaj pomiary ponownie.", wraplength=740).grid(row=7, column=0, columnspan=3, sticky="w", pady=8)
@@ -152,41 +174,47 @@ class Application:
             self.controls.append(text)
             details.rowconfigure(row + 1, weight=1)
         channels.columnconfigure(0, weight=1)
-        channels.rowconfigure(2, weight=1)
-        channels.rowconfigure(5, weight=1)
-        ttk.Label(channels, text="Zaznacz kanały do wykresów i tabel (Ctrl / Shift dla wielu pozycji).").grid(row=0, column=0, sticky="w")
+        channels.rowconfigure(4, weight=3)
+        channels.rowconfigure(7, weight=1)
+        self.dates_check = ttk.Checkbutton(channels, text="Sprawdzono daty i zakres pomiaru w WinPQ (wymagane dla PQF)", variable=self.dates_verified)
+        self.dates_check.grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.controls.append(self.dates_check)
+        ttk.Label(channels, textvariable=self.measurement_period, wraplength=700).grid(row=1, column=0, sticky="w", pady=(0, 8))
+        ttk.Label(channels, text="Zaznacz kanały do wykresów i tabel (Ctrl / Shift dla wielu pozycji).").grid(row=2, column=0, sticky="w")
         selection_bar = ttk.Frame(channels)
-        selection_bar.grid(row=1, column=0, sticky="w", pady=8)
+        selection_bar.grid(row=3, column=0, sticky="w", pady=8)
         self._button(selection_bar, "Podstawowe + widma", self.select_defaults, row=0, column=0)
         self._button(selection_bar, "Wszystkie", lambda: self._select_all(True), row=0, column=1, padx=8)
         self._button(selection_bar, "Wyczyść wybór", lambda: self._select_all(False), row=0, column=2)
         self._button(selection_bar, "Tylko THD(A) i widma", self.select_harmonics, row=0, column=3, padx=8)
         frame = ttk.Frame(channels)
-        frame.grid(row=2, column=0, sticky="nsew")
-        self.channel_list = tk.Listbox(frame, selectmode="extended", exportselection=False, height=10, font=("Segoe UI", 10))
+        frame.grid(row=4, column=0, sticky="nsew")
+        self.channel_list = tk.Listbox(frame, selectmode="extended", exportselection=False, height=4, font=("Segoe UI", 10))
         scroll = ttk.Scrollbar(frame, command=self.channel_list.yview)
         self.channel_list.configure(yscrollcommand=scroll.set)
         self.channel_list.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         self.controls.append(self.channel_list)
         self.selected_info = tk.StringVar(value="Wybrano 0 kanałów")
-        ttk.Label(channels, textvariable=self.selected_info).grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Label(channels, textvariable=self.selected_info).grid(row=5, column=0, sticky="w", pady=4)
         self.channel_list.bind("<<ListboxSelect>>", lambda event: self._selection_info())
-        ttk.Label(channels, text="Uwagi do danych (uwzględniane w raporcie)").grid(row=4, column=0, sticky="w", pady=(8, 4))
-        self.warnings = tk.Text(channels, height=5, wrap="word", state="disabled", font=("Segoe UI", 9))
-        self.warnings.grid(row=5, column=0, sticky="nsew")
-        verified = ttk.Checkbutton(channels, text="Sprawdzono daty i zakres pomiaru (wymagane dla bezpośredniego PQF)", variable=self.dates_verified)
-        verified.grid(row=6, column=0, sticky="w", pady=8)
-        self.controls.append(verified)
+        ttk.Label(channels, text="Uwagi do danych (uwzględniane w raporcie)").grid(row=6, column=0, sticky="w", pady=(8, 4))
+        warning_frame = ttk.Frame(channels)
+        warning_frame.grid(row=7, column=0, sticky="nsew")
+        self.warnings = tk.Text(warning_frame, width=1, height=3, wrap="word", state="disabled", font=("Segoe UI", 9))
+        warning_scroll = ttk.Scrollbar(warning_frame, command=self.warnings.yview)
+        self.warnings.configure(yscrollcommand=warning_scroll.set)
+        self.warnings.pack(side="left", fill="both", expand=True)
+        warning_scroll.pack(side="right", fill="y")
         spectrum_options = ttk.Frame(channels)
-        spectrum_options.grid(row=7, column=0, sticky="w", pady=4)
+        spectrum_options.grid(row=8, column=0, sticky="w", pady=4)
         ttk.Label(spectrum_options, text="Statystyka słupków widma:").pack(side="left", padx=(0, 12))
         for label, value in (("Średnia", "mean"), ("Maksimum", "max"), ("Percentyl 95", "p95")):
             option = ttk.Radiobutton(spectrum_options, text=label, value=value, variable=self.spectrum_statistic)
             option.pack(side="left", padx=5)
             self.controls.append(option)
         ttk.Label(channels, text="Widma: harmoniczne 2–50 z CSV; kolory oznaczają fazy. Brak kanału nie oznacza zera.",
-                  wraplength=740).grid(row=8, column=0, sticky="w", pady=4)
+                  wraplength=700).grid(row=9, column=0, sticky="w", pady=4)
         footer = ttk.Frame(outer)
         footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
         self._button(footer, "Generuj PDF", self.generate, row=0, column=0)
@@ -275,6 +303,7 @@ class Application:
         self.dates_verified.set(False)
         self.channel_list.delete(0, "end")
         self.info.set("Nie wczytano pomiarów.")
+        self.measurement_period.set("Nie wczytano pomiarów.")
         self._selection_info()
         self.warnings.configure(state="normal")
         self.warnings.delete("1.0", "end")
@@ -309,7 +338,7 @@ class Application:
         self._work(operation, self._loaded)
 
     def pick_csv(self):
-        path = filedialog.askopenfilename(title="Wybierz eksport CSV z WinPQ mobil", filetypes=[("Pliki CSV", "*.csv"), ("Wszystkie pliki", "*.*")])
+        path = filedialog.askopenfilename(title="Wybierz eksport CSV z Sonel Analysis lub WinPQ mobil", filetypes=[("Pliki CSV", "*.csv"), ("Wszystkie pliki", "*.*")])
         if path:
             self.source_kind = "csv"
             self.csv_path = path
@@ -324,6 +353,8 @@ class Application:
         self._work(operation, self._loaded)
 
     def _loaded(self, dataset):
+        self.dates_verified.set(False)
+        self.measurement_period.set(f"Okres do sprawdzenia: {dataset.times[0]:%Y-%m-%d %H:%M:%S} — {dataset.times[-1]:%Y-%m-%d %H:%M:%S}")
         self.dataset = dataset
         self.channel_names = list(dataset.channels)
         for name in self.channel_names:
@@ -338,7 +369,8 @@ class Application:
         else:
             self.select_defaults()
         self._selection_info()
-        self.info.set(f"Źródło: {'PQBox' if self.source_kind == 'pqf' else self.csv_path}\n"
+        self.info.set(f"Format: {dataset.metadata.get('import_type', 'PQBox')}\n"
+                      f"Źródło: {'PQBox' if self.source_kind == 'pqf' else self.csv_path}\n"
                       f"Okres: {dataset.times[0]:%Y-%m-%d %H:%M:%S} — {dataset.times[-1]:%Y-%m-%d %H:%M:%S}\n"
                       f"Próbki: {len(dataset.times):,}  •  Kanały: {len(dataset.channels)}  •  Pliki źródłowe: {len(dataset.source_files)}".replace(",", " "))
         self.warnings.configure(state="normal")
@@ -383,7 +415,10 @@ class Application:
             return
         if self.source_kind == "pqf" and not self.dates_verified.get():
             self.tabs.select(2)
-            messagebox.showerror("Sprawdź daty", "Porównaj daty i zakres pomiaru z WinPQ, a następnie zaznacz potwierdzenie w zakładce Kanały i PDF.")
+            self.channels_canvas.yview_moveto(0)
+            self.channels_canvas.xview_moveto(0)
+            self.dates_check.focus_set()
+            messagebox.showerror("Sprawdź daty", f"{self.measurement_period.get()}\n\nPorównaj ten zakres z WinPQ. Następnie zaznacz „Sprawdzono daty i zakres pomiaru” na górze zakładki Kanały i PDF.")
             return
         names = [self.channel_names[i] for i in self.channel_list.curselection()]
         if not names:
@@ -490,7 +525,7 @@ class Application:
         self.status.set("Projekt otwarty. Ponownie wczytaj pomiary, aby sprawdzić aktualne pliki źródłowe.")
         self.tabs.select(0)
         if self.source_kind == "csv":
-            self.info.set(f"Projekt używał eksportu CSV:\n{self.csv_path}\nUżyj przycisku „Wczytaj pomocniczy CSV…”.")
+            self.info.set(f"Projekt używał eksportu CSV:\n{self.csv_path}\nUżyj przycisku „Wczytaj CSV (Sonel / WinPQ)…”.")
 
     def export_data(self):
         if self.dataset is None:

@@ -24,3 +24,11 @@
 - Nie publikować ani wysyłać pomiarów do usług zewnętrznych.
 - Nie dodawać plików pomiarowych, buildów i danych klientów do Git.
 - Każdy etap opisać uczciwie: działające, sprawdzone, ograniczenia, kolejny krok.
+
+## Wersje aplikacji EXE
+- Obecne wydanie oznacz jako v1.1. Numer aktualnego wydania przechowuj w `VERSION`.
+- Utrzymuj jeden aktualny plik w `dist/LOPI-PQ-Report-v<wersja>.exe`.
+- Starsze EXE przenoś do `dist/Kontrola funkcji/`, w podfolderach zachowujących numer wersji i datę archiwizacji. Nie twórz kolejnych folderów typu poprawka/pdf-fix.
+- Numer dobieraj samodzielnie do zakresu zmian: drobna poprawka v1.1.1, rozszerzenie funkcji v1.2, duża zmiana v2.0. Opisz zmiany w `CHANGELOG.md`.
+- Najpierw zbuduj i sprawdź nowy EXE w katalogu roboczym; dopiero po udanym teście PDF archiwizuj poprzedni i udostępniaj nowy. Nie zamykaj aplikacji z niezapisanymi danymi; blokadę pliku zgłoś uczciwie.
+- Ta zasada dotyczy EXE, nie raportów, danych pomiarowych ani materiałów źródłowych. Archiwum buildów pozostaje poza Git.

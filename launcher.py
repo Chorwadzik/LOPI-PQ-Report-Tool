@@ -11,7 +11,7 @@ def main():
         desktop()
         return
     parser = argparse.ArgumentParser(description='LOPI PQ Report Tool — lokalny generator PDF')
-    parser.add_argument('--input', required=True, type=Path, help='Folder PQBox albo plik CSV')
+    parser.add_argument('--input', required=True, type=Path, help='Folder PQBox albo eksport CSV z Sonel Analysis / WinPQ')
     parser.add_argument('--output', required=True, type=Path, help='Docelowy PDF')
     parser.add_argument('--metadata', required=True, type=Path, help='JSON z metadanymi raportu')
     parser.add_argument('--time-offset', type=float, default=2, help='Jawne przesunięcie zegara PQF w godzinach')
@@ -26,7 +26,7 @@ def main():
             raise ValueError('Metadane muszą zawierać tytuł raportu.')
         if args.output.exists():
             raise ValueError('Plik wyjściowy istnieje. Wybierz inną nazwę.')
-        data = import_csv(args.input) if args.input.suffix.lower() == '.csv' else import_pqf(args.input, time_offset_hours=args.time_offset)
+        data = import_pqf(args.input, time_offset_hours=args.time_offset) if args.input.is_dir() else import_csv(args.input)
         selected = data.subset(default_channels(data))
         generate_report(selected, metadata, args.output)
         result = {'ok': True, 'output': str(args.output.resolve()), 'samples': len(data.times),
@@ -36,7 +36,9 @@ def main():
     if args.status_file:
         args.status_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     if sys.stdout:
-        print(json.dumps(result, ensure_ascii=False))
+        # ASCII escapes keep JSON valid even when a Windows pipe uses cp1250.
+        # The UTF-8 status file and PDF retain all original Unicode characters.
+        print(json.dumps(result, ensure_ascii=True))
     if not result['ok']:
         raise SystemExit(1)
 
